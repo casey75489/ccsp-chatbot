@@ -25,7 +25,7 @@ st.set_page_config(
     page_title="CCSP Exam Prep Chatbot",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom Premium Styling Injected via CSS
@@ -73,10 +73,12 @@ st.markdown("""
     color: #94a3b8;
 }
 
-/* Glassmorphism sidebar & widget styling */
+/* Hide Streamlit sidebar and toggle button completely */
 section[data-testid="stSidebar"] {
-    background-color: #0f172a !important;
-    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+    display: none !important;
+}
+div[data-testid="collapsedControl"] {
+    display: none !important;
 }
 
 .sidebar-status {
@@ -151,7 +153,6 @@ def get_embeddings(api_key):
     try:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
         embeddings.embed_query("test")
-        st.sidebar.info("💡 已自動載入 Gemini 推薦的 models/gemini-embedding-001 向量模型。")
         return embeddings
     except Exception:
         pass
@@ -160,74 +161,16 @@ def get_embeddings(api_key):
     try:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
         embeddings.embed_query("test")
-        st.sidebar.info("💡 已自動載入經典款 models/embedding-001 向量模型。")
         return embeddings
     except Exception as e:
-        st.sidebar.error(f"❌ 無法載入任何 Embedding 模型。請點擊側邊欄「🔍 檢測 API Key 與可用模型」按鈕進行連線測試。最後錯誤: {e}")
         raise e
 
-# Sidebar Configuration
-st.sidebar.title("⚙️ CCSP Chatbot 設定")
-
-# 1. API Key Setup (Check environment first, else request input)
-env_api_key = os.getenv("GOOGLE_API_KEY", "")
-api_key = st.sidebar.text_input(
-    "Google Gemini API Key",
-    value=env_api_key,
-    type="password",
-    help="請輸入您的 Google Gemini API Key。若已在 .env 設定則會自動帶入。"
-)
-
-# API Key Diagnostics Button
-if st.sidebar.button("🔍 檢測 API Key 與可用模型"):
-    if not api_key:
-        st.sidebar.error("❌ 請先輸入 API Key")
-    else:
-        with st.sidebar.status("正在與 Google 伺服器連線...", expanded=True) as status:
-            try:
-                from google import genai
-                client = genai.Client(api_key=api_key)
-                models = list(client.models.list())
-                embed_models = [m.name for m in models if "embed" in m.name.lower()]
-                all_models = [m.name for m in models]
-                status.update(label="✅ 連線成功！", state="complete")
-                st.sidebar.success("API Key 驗證成功！")
-                st.sidebar.write("**可用的 Embedding 模型：**")
-                if embed_models:
-                    for m in embed_models:
-                        st.sidebar.code(m)
-                else:
-                    st.sidebar.warning("⚠️ 找不到任何支援 Embedding 的模型。請檢查此 API Key 是否有 Generative Language API 權限。")
-                st.sidebar.write("**前 10 個可用模型：**")
-                st.sidebar.json(all_models[:10])
-            except Exception as e:
-                status.update(label="❌ 連線失敗", state="error")
-                st.sidebar.error(f"檢測時發生錯誤: {e}")
-                st.sidebar.info("💡 提示：請確認您的 API Key 是否正確。如果是從 Google Cloud Console 申請，請確認是否已啟用 'Generative Language API' 服務。")
-
-# 2. LLM Model Selection
-model_option = st.sidebar.selectbox(
-    "Reasoning Model",
-    options=["gemini-3.5-flash", "gemini-3.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
-    index=0,
-    help="Gemini 3.5 Flash 是目前推薦的標準模型，速度快且效能極佳；Gemini 3.5 Pro 具備頂級推理能力，適合複雜情境題分析。"
-)
-
-# 3. Model Parameters
-temperature = st.sidebar.slider(
-    "Temperature (隨機度)",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.2,
-    step=0.1,
-    help="較低的值可獲得更精準與事實一致的回答，適合資安考試準備。"
-)
-
-# 4. RAG Parameters
-st.sidebar.markdown("---")
-st.sidebar.subheader("📄 文件向量化參數")
-chunk_size = st.sidebar.slider("Chunk Size (字元數)", 500, 3000, 2000, 100)
-chunk_overlap = st.sidebar.slider("Chunk Overlap (重疊字元)", 50, 600, 400, 50)
+# Load configurations from environment or defaults (no sidebar inputs)
+api_key = os.getenv("GOOGLE_API_KEY", "")
+model_option = "gemini-3.5-flash"
+temperature = 0.2
+chunk_size = 2000
+chunk_overlap = 400
 
 # Load Vector DB
 @st.cache_resource(show_spinner=False)
@@ -239,7 +182,7 @@ def get_vector_db(api_key):
         # Load local FAISS database (safe to deserialize local files)
         return FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
     except Exception as e:
-        st.sidebar.error(f"載入向量庫時出錯: {e}")
+        st.error(f"載入向量庫時出錯: {e}")
         return None
 
 # Build Vector DB
@@ -334,17 +277,7 @@ def trigger_indexing(api_key, chunk_size, chunk_overlap):
         progress_bar.empty()
         status_card.empty()
 
-# Show Status in Sidebar
-st.sidebar.markdown("---")
-st.sidebar.subheader("📡 向量資料庫狀態")
-if is_vector_db_indexed():
-    st.sidebar.markdown('<div class="sidebar-status status-ready">🟢 向量資料庫已就緒 (本地有存檔)</div>', unsafe_allow_html=True)
-    if st.sidebar.button("🔄 重新掃描並向量化文件"):
-        trigger_indexing(api_key, chunk_size, chunk_overlap)
-else:
-    st.sidebar.markdown('<div class="sidebar-status status-warning">🟡 向量資料庫未建立 (請先向量化)</div>', unsafe_allow_html=True)
-    if st.sidebar.button("⚡ 開始掃描並向量化文件"):
-        trigger_indexing(api_key, chunk_size, chunk_overlap)
+# (Sidebar status display and rebuild button removed for a clean web interface)
 
 # Main Application Layout
 st.markdown("""
@@ -364,9 +297,9 @@ if api_key:
 
 # App logical flow
 if not api_key:
-    st.info("💡 **歡迎使用 CCSP 考試準備 Chatbot**\n\n請在左側邊欄輸入您的 **Google Gemini API Key** 以啟動服務。")
+    st.info("💡 **歡迎使用 CCSP 考試準備 Chatbot**\n\n請在後台設定您的 **Google Gemini API Key** (即 Streamlit Secrets) 以啟動服務。")
 elif not is_vector_db_indexed():
-    st.warning("⚠️ **向量資料庫尚未建立**\n\n偵測到本地還沒有建立向量資料庫。請在左側側邊欄點選 **「⚡ 開始掃描並向量化文件」** 按鈕，系統會自動處理 `./data` 資料夾中的所有 PDF 檔案。")
+    st.warning("⚠️ **向量資料庫尚未建立**\n\n偵測到本地還沒有建立向量資料庫。請確認 `faiss_index` 目錄是否已正確上傳至儲存庫中。")
 else:
     # Initialize Chat History
     if "messages" not in st.session_state:
